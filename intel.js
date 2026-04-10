@@ -47,8 +47,8 @@ function getComponents(tab, page, maxPages) {
     return [row1];
 }
 
-const formatNum = (val) => val == null ? 'N/A' : Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 });
-const formatChange = (change) => change == null ? '' : ` (${change > 0 ? '+' : ''}${change.toFixed(1)}%)`;
+const formatNum = (val) => val == null ? 'N/A' : Math.ceil(Number(val)).toLocaleString();
+const formatChange = (change) => change == null ? '' : ` (${change > 0 ? '+' : ''}${Math.ceil(change)}%)`;
 
 // ---- Cached Discord invite lookup ----
 async function getDiscordInviteInfo(inviteCode) {
@@ -84,7 +84,7 @@ async function getEmbed(data, tab, page) {
             embed.addFields(
                 { name: 'Live Players', value: `${formatNum(kpi.playing?.current?.value)}${formatChange(kpi.playing?.week?.percent_change)}`, inline: true },
                 { name: 'Visits', value: `${formatNum(kpi.visits?.current?.value)}${formatChange(kpi.visits?.week?.percent_change)}`, inline: true },
-                { name: 'Avg Session', value: `${kpi.session_length?.current?.value ? kpi.session_length.current.value.toFixed(1) + 'm' : 'N/A'}${formatChange(kpi.session_length?.week?.percent_change)}`, inline: true }
+                { name: 'Avg Session', value: `${kpi.session_length?.current?.value ? Math.ceil(kpi.session_length.current.value) + 'm' : 'N/A'}${formatChange(kpi.session_length?.week?.percent_change)}`, inline: true }
             );
             if (kpi.revenue?.current?.value) {
                 embed.addFields({ name: 'Daily Avg Revenue (7D)', value: `R$${formatNum(kpi.revenue.current.value)}${formatChange(kpi.revenue?.week?.percent_change)}`, inline: false });
@@ -93,7 +93,7 @@ async function getEmbed(data, tab, page) {
 
         if (data.votes) {
             const total = data.votes.upVotes + data.votes.downVotes;
-            const ratio = total > 0 ? ((data.votes.upVotes / total) * 100).toFixed(1) : 0;
+            const ratio = total > 0 ? Math.ceil((data.votes.upVotes / total) * 100) : 0;
             embed.addFields({ name: 'Sentiment', value: `**${ratio}%** Approval\n(${formatNum(data.votes.upVotes)} 👍 / ${formatNum(data.votes.downVotes)} 👎)`, inline: true });
         }
 
@@ -154,8 +154,8 @@ async function getEmbed(data, tab, page) {
 
             for (const badge of chunk) {
                 const awards = badge.statistics?.awardedCount || 0;
-                const apiWinRate = badge.statistics?.winRatePercentage !== undefined ? (badge.statistics.winRatePercentage * 100).toFixed(1) + '%' : 'N/A';
-                const trueRetention = starterAwards > 0 ? ((awards / starterAwards) * 100).toFixed(1) + '%' : 'N/A';
+                const apiWinRate = badge.statistics?.winRatePercentage !== undefined ? Math.ceil(badge.statistics.winRatePercentage * 100) + '%' : 'N/A';
+                const trueRetention = starterAwards > 0 ? Math.ceil((awards / starterAwards) * 100) + '%' : 'N/A';
 
                 desc += `\n**${badge.name}**\nRetention: **${trueRetention}** (API: ${apiWinRate})\nAwarded: ${formatNum(awards)}\n`;
             }
@@ -206,7 +206,7 @@ async function getEmbed(data, tab, page) {
                 let desc = `[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n**Top 5 Clusters:**`;
                 const top5 = serverData.data.slice(0, 5);
                 for (const srv of top5) {
-                    desc += `\n\n**Server:** \`${srv.id.substring(0, 8)}\`\nStatus: **${srv.playing}/${srv.maxPlayers} players**\nDiagnostics: **${srv.ping}ms** / **${srv.fps.toFixed(1)} FPS**`;
+                    desc += `\n\n**Server:** \`${srv.id.substring(0, 8)}\`\nStatus: **${srv.playing}/${srv.maxPlayers} players**\nDiagnostics: **${srv.ping}ms** / **${Math.ceil(srv.fps)} FPS**`;
                 }
                 embed.setDescription(desc);
             }
