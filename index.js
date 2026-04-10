@@ -373,7 +373,7 @@ client.on('interactionCreate', async interaction => {
 const MARKET_CHANNELS = {
     '1395373507361247272': { type: 'embedOnly' }, // poker deal
     '1395373429032747070': { type: 'embedOnly' }, // insane potential
-    '1395373404437221386': { type: 'ccuGate', minCcu: 10000 }, // high ccu
+    '1395373404437221386': { type: 'ccuGate', minCcu: 5000 }, // high ccu
     '1395373373063823492': { type: 'ccuGate', minCcu: 1000 }, // mid ccu
     '1395373355552608348': { type: 'ccuGate', minCcu: 100 } // low ccu
 };
@@ -422,6 +422,29 @@ client.on('messageCreate', async message => {
 
         const ccu = dataObj.kpi?.playing?.current?.value || 0;
         const revenue = dataObj.kpi?.revenue?.current?.value || 0;
+        const visits = dataObj.kpi?.visits?.current?.value || dataObj.info?.visits || 0;
+
+        let ratioStr = 'N/A';
+        if (dataObj.votes) {
+            const total = dataObj.votes.upVotes + dataObj.votes.downVotes;
+            if (total > 0) {
+                ratioStr = ((dataObj.votes.upVotes / total) * 100).toFixed(0) + '%';
+            }
+        }
+
+        // Fetch Square Icon
+        let iconUrl = dataObj.thumbnailUrl; // Fallback
+        if (dataObj.universeId) {
+            try {
+                const iconRes = await fetch(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${dataObj.universeId}&returnPolicy=PlaceHolder&size=150x150&format=Png`);
+                if (iconRes.ok) {
+                    const iData = await iconRes.json();
+                    if (iData?.data?.[0]?.imageUrl) {
+                        iconUrl = iData.data[0].imageUrl;
+                    }
+                }
+            } catch (e) {}
+        }
 
         if (channelRule.type === 'ccuGate') {
             if (ccu < channelRule.minCcu) {
@@ -435,10 +458,10 @@ client.on('messageCreate', async message => {
             .setColor('#23272a') // Dark color to blend in nicely and look minimal
             .setAuthor({ 
                 name: dataObj.info?.name || 'Unknown Game', 
-                iconURL: dataObj.thumbnailUrl || undefined, 
+                iconURL: iconUrl || undefined, 
                 url: `https://www.roblox.com/games/${dataObj.placeId}` 
             })
-            .setDescription(`👥 **CCU:** ${ccu.toLocaleString()} | 💰 **Daily Rev (7D):** R$${Number(revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+            .setDescription(`👥 **CCU:** ${ccu.toLocaleString()} | 💰 **ESTIMATED DAILY REV:** R$${Number(revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}\n📈 **Visits:** ${Number(visits).toLocaleString()} | 👍 **Like Ratio:** ${ratioStr}`);
 
         await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } }).catch(console.error);
 
