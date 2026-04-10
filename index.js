@@ -422,9 +422,9 @@ client.on('messageCreate', async message => {
             return;
         }
 
-        const ccu = dataObj.kpi?.playing?.current?.value || 0;
-        const revenue = dataObj.kpi?.revenue?.current?.value || 0;
-        const visits = dataObj.kpi?.visits?.current?.value || dataObj.info?.visits || 0;
+        const ccu = Math.ceil(dataObj.kpi?.playing?.current?.value || 0);
+        const revenue = Math.ceil(dataObj.kpi?.revenue?.current?.value || 0);
+        const visits = Math.ceil(dataObj.kpi?.visits?.current?.value || dataObj.info?.visits || 0);
 
         let ratioStr = 'N/A';
         if (dataObj.votes) {
@@ -474,7 +474,7 @@ client.on('messageCreate', async message => {
                 iconURL: iconUrl || undefined, 
                 url: `https://www.roblox.com/games/${dataObj.placeId}` 
             })
-            .setDescription(`👥 **CCU:** ${ccu.toLocaleString()} | 💰 **ESTIMATED DAILY REV:** R$${Number(revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}\n📈 **Visits:** ${Number(visits).toLocaleString()} | 👍 **Like Ratio:** ${ratioStr}`);
+            .setDescription(`👥 **CCU:** ${ccu.toLocaleString()} | 💰 **ESTIMATED DAILY REV:** R$${revenue.toLocaleString()}\n📈 **Visits:** ${visits.toLocaleString()} | 👍 **Like Ratio:** ${ratioStr}`);
 
         await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } }).catch(console.error);
 
