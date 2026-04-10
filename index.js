@@ -200,9 +200,6 @@ client.on('interactionCreate', async interaction => {
             if (amount < 1 || amount > 100) return interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
             
             // No protection check needed for clear filter
-====
-====
-====
 
             await interaction.deferReply({ ephemeral: true });
             let messages = await channel.messages.fetch({ limit: amount });
