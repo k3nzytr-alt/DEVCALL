@@ -399,7 +399,8 @@ client.on('messageCreate', async message => {
     if (lastUse && Date.now() - lastUse < MARKET_COOLDOWN) {
         await message.delete().catch(() => {});
         const waitTime = Math.ceil((MARKET_COOLDOWN - (Date.now() - lastUse)) / 1000);
-        await message.author.send(`🛑 **Spam Protection:** Please wait ${waitTime}s before posting another game link.`).catch(() => {});
+        const replyMsg = await message.channel.send(`🛑 <@${message.author.id}>, **Spam Protection:** Please wait ${waitTime}s before posting another game link.\n*(This message will delete in 10 seconds)*`).catch(() => null);
+        if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 10000);
         return;
     }
     marketCooldowns.set(userId, Date.now());
@@ -415,7 +416,8 @@ client.on('messageCreate', async message => {
             // Security: Prevent bypassing CCU requirements by posting invalid/broken links
             if (channelRule.type === 'ccuGate') {
                 await message.delete().catch(() => {});
-                await message.author.send(`Your listing in <#${message.channelId}> was removed because we couldn't verify the game's data. Ensure it's a valid Roblox game link.`).catch(() => {});
+                const replyMsg = await message.channel.send(`Hey <@${message.author.id}>, your listing was removed because we couldn't verify the game's data. Ensure it's a valid Roblox game link.\n*(This message will delete in 30 seconds)*`).catch(() => null);
+                if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 30000);
             }
             return;
         }
@@ -449,7 +451,18 @@ client.on('messageCreate', async message => {
         if (channelRule.type === 'ccuGate') {
             if (ccu < channelRule.minCcu) {
                 await message.delete().catch(() => {});
-                await message.author.send(`Your listing was removed from <#${message.channelId}> because the game's CCU (**${ccu.toLocaleString()}**) is below the requirement of **${channelRule.minCcu.toLocaleString()}** CCU.`).catch(() => {});
+                
+                let suitableChannel = null;
+                if (ccu >= 5000) suitableChannel = '<#1395373404437221386>'; // high ccu
+                else if (ccu >= 1000) suitableChannel = '<#1395373373063823492>'; // mid ccu
+                else if (ccu >= 100) suitableChannel = '<#1395373355552608348>'; // low ccu
+                else suitableChannel = '<#1395373288133230674>'; // early released
+
+                let msgText = `**Your listing was removed!** The game's CCU (**${ccu.toLocaleString()}**) is below the requirement of **${channelRule.minCcu.toLocaleString()}** CCU for this channel.`;
+                msgText += `\n👉 Please post this in ${suitableChannel} instead!`;
+
+                const replyMsg = await message.channel.send(`Hey <@${message.author.id}>, ${msgText}\n*(This message will delete in 30 seconds)*`).catch(() => null);
+                if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 30000);
                 return;
             }
         }
