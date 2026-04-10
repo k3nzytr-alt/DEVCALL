@@ -420,4 +420,4 @@ async function handleIntelButton(interaction) {
     await interaction.update({ embeds: [embed], components });
 }
 
-module.exports = { handleIntelCommand, handleIntelButton };
+module.exports = { handleIntelCommand, handleIntelButton, fetchGameData };

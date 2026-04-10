@@ -370,4 +370,81 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+const MARKET_CHANNELS = {
+    '1395373507361247272': { type: 'embedOnly' }, // poker deal
+    '1395373429032747070': { type: 'embedOnly' }, // insane potential
+    '1395373404437221386': { type: 'ccuGate', minCcu: 10000 }, // high ccu
+    '1395373373063823492': { type: 'ccuGate', minCcu: 1000 }, // mid ccu
+    '1395373355552608348': { type: 'ccuGate', minCcu: 100 } // low ccu
+};
+
+const MARKET_COOLDOWN = 15000; // 15 seconds
+const marketCooldowns = new Map();
+
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+
+    const channelRule = MARKET_CHANNELS[message.channelId];
+    if (!channelRule) return;
+
+    const placeIdMatch = message.content.match(/roblox\.com\/games\/(\d+)/i);
+    if (!placeIdMatch) return;
+
+    const placeId = placeIdMatch[1];
+    
+    // --- Rate Limit & Anti-Spam Security ---
+    const userId = message.author.id;
+    const lastUse = marketCooldowns.get(userId);
+    if (lastUse && Date.now() - lastUse < MARKET_COOLDOWN) {
+        await message.delete().catch(() => {});
+        const waitTime = Math.ceil((MARKET_COOLDOWN - (Date.now() - lastUse)) / 1000);
+        await message.author.send(`🛑 **Spam Protection:** Please wait ${waitTime}s before posting another game link.`).catch(() => {});
+        return;
+    }
+    marketCooldowns.set(userId, Date.now());
+    // Auto-cleanup map to prevent memory leaks over time
+    setTimeout(() => marketCooldowns.delete(userId), MARKET_COOLDOWN);
+    
+    const fetchOpts = { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } };
+    
+    try {
+        const dataObj = await intel.fetchGameData(placeId, fetchOpts);
+        
+        if (!dataObj) {
+            // Security: Prevent bypassing CCU requirements by posting invalid/broken links
+            if (channelRule.type === 'ccuGate') {
+                await message.delete().catch(() => {});
+                await message.author.send(`Your listing in <#${message.channelId}> was removed because we couldn't verify the game's data. Ensure it's a valid Roblox game link.`).catch(() => {});
+            }
+            return;
+        }
+
+        const ccu = dataObj.kpi?.playing?.current?.value || 0;
+        const revenue = dataObj.kpi?.revenue?.current?.value || 0;
+
+        if (channelRule.type === 'ccuGate') {
+            if (ccu < channelRule.minCcu) {
+                await message.delete().catch(() => {});
+                await message.author.send(`Your listing was removed from <#${message.channelId}> because the game's CCU (**${ccu.toLocaleString()}**) is below the requirement of **${channelRule.minCcu.toLocaleString()}** CCU.`).catch(() => {});
+                return;
+            }
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#23272a') // Dark color to blend in nicely and look minimal
+            .setAuthor({ 
+                name: dataObj.info?.name || 'Unknown Game', 
+                iconURL: dataObj.thumbnailUrl || undefined, 
+                url: `https://www.roblox.com/games/${dataObj.placeId}` 
+            })
+            .setDescription(`👥 **CCU:** ${ccu.toLocaleString()} | 💰 **Daily Rev (7D):** R$${Number(revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+
+        await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } }).catch(console.error);
+
+    } catch (err) {
+        console.error('Error processing market channel message:', err);
+    }
+});
+
 client.login(process.env.DISCORD_TOKEN);
