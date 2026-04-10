@@ -148,7 +148,7 @@ client.on('interactionCreate', async interaction => {
         if (commandName === 'ban') {
             const user = options.getUser('user');
             const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
+            if (!targetMember) return interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
 
             const reason = options.getString('reason') || 'No reason provided';
             await targetMember.ban({ reason });
@@ -165,7 +165,7 @@ client.on('interactionCreate', async interaction => {
         else if (commandName === 'kick') {
             const user = options.getUser('user');
             const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
+            if (!targetMember) return interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
 
             const reason = options.getString('reason') || 'No reason provided';
             await targetMember.kick(reason);
@@ -175,7 +175,7 @@ client.on('interactionCreate', async interaction => {
         else if (commandName === 'mute') {
             const user = options.getUser('user');
             const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
+            if (!targetMember) return interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
 
             const duration = options.getInteger('duration');
             const reason = options.getString('reason') || 'No reason provided';
@@ -187,7 +187,7 @@ client.on('interactionCreate', async interaction => {
         else if (commandName === 'unmute') {
             const user = options.getUser('user');
             const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
+            if (!targetMember) return interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
 
             await targetMember.timeout(null, 'Manual unmute');
             await interaction.reply(`🔊 Successfully unmuted \`${user.tag}\`.`);
@@ -199,10 +199,10 @@ client.on('interactionCreate', async interaction => {
             
             if (amount < 1 || amount > 100) return interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
             
-            if (user) {
-                const targetMember = await guild.members.fetch(user.id).catch(() => null);
-                if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
-            }
+            // No protection check needed for clear filter
+====
+====
+====
 
             await interaction.deferReply({ ephemeral: true });
             let messages = await channel.messages.fetch({ limit: amount });
@@ -232,9 +232,6 @@ client.on('interactionCreate', async interaction => {
 
         else if (commandName === 'warn') {
             const user = options.getUser('user');
-            const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
-
             const reason = options.getString('reason');
             db.addWarning(user.id, reason);
             await interaction.reply(`⚠️ Warned \`${user.tag}\`: ${reason}`);
@@ -288,7 +285,7 @@ client.on('interactionCreate', async interaction => {
         else if (commandName === 'role') {
             const user = options.getUser('user');
             const targetMember = await guild.members.fetch(user.id).catch(() => null);
-            if (!isTargetable(targetMember)) return interaction.reply({ content: SAFETY_FAIL_MSG, ephemeral: true });
+            if (!targetMember) return interaction.reply({ content: '❌ User not found in this server.', ephemeral: true });
 
             const action = options.getString('action');
             const role = options.getRole('role');
