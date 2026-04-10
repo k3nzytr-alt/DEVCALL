@@ -4,13 +4,15 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const intelCache = new Map();       // messageId -> dataObj (per-dashboard state)
 const gameDataCache = new Map();    // universeId -> { data, timestamp }  (shared across users)
 const discordInviteCache = new Map(); // inviteCode -> { total, online, timestamp }
-const userCooldowns = new Map();    // userId -> timestamp
+const userCooldowns = new Map();    // userId -> timestamp (command)
+const buttonCooldowns = new Map();  // userId -> timestamp (buttons)
 
 const GAME_CACHE_TTL = 5 * 60 * 1000;     // 5 min — same game won't re-fetch
 const INVITE_CACHE_TTL = 10 * 60 * 1000;  // 10 min — Discord member counts
 const USER_COOLDOWN = 5 * 1000;            // 5 sec between /intel calls per user
+const BUTTON_COOLDOWN = 1500;              // 1.5 sec between button clicks
 const FETCH_TIMEOUT = 8000;                // 8 sec max per API call
-const DASHBOARD_TTL = 15 * 60 * 1000;     // 15 min — dashboard stays interactive
+const DASHBOARD_TTL = 60 * 60 * 1000;      // 1 hour — dashboard stays interactive
 
 // Timeout-wrapped fetch
 function timedFetch(url, opts = {}) {
@@ -41,7 +43,7 @@ function getComponents(tab, page, maxPages) {
             );
         return [row1, row2];
     }
-    
+
     return [row1];
 }
 
@@ -65,7 +67,7 @@ async function getDiscordInviteInfo(inviteCode) {
             discordInviteCache.set(inviteCode, info);
             return info;
         }
-    } catch(e) {}
+    } catch (e) { }
     return null;
 }
 
@@ -76,7 +78,7 @@ async function getEmbed(data, tab, page) {
     if (tab === 'general') {
         embed.setTitle(`DevCall$ Intel: ${data.info?.name || 'Unknown'}`);
         embed.setDescription(`[View on Roblox](https://www.roblox.com/games/${data.placeId})`);
-        
+
         const kpi = data.kpi;
         if (kpi) {
             embed.addFields(
@@ -96,22 +98,22 @@ async function getEmbed(data, tab, page) {
         }
 
         if (data.info) {
-             embed.addFields({ name: 'Timeline', value: `**Launched:** <t:${Math.floor(new Date(data.info.created).getTime()/1000)}:d>\n**Last Updated:** <t:${Math.floor(new Date(data.info.updated).getTime()/1000)}:R>\n**Universe ID:** \`${data.universeId}\``, inline: true });
+            embed.addFields({ name: 'Timeline', value: `**Launched:** <t:${Math.floor(new Date(data.info.created).getTime() / 1000)}:d>\n**Last Updated:** <t:${Math.floor(new Date(data.info.updated).getTime() / 1000)}:R>\n**Universe ID:** \`${data.universeId}\``, inline: true });
         }
 
         if (data.thumbnailUrl) embed.setImage(data.thumbnailUrl);
-    } 
+    }
     else if (tab === 'monetization') {
         embed.setTitle(`Monetization Breakdown`);
         embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})`);
-        
+
         const passes = data.gamepasses;
         if (!passes || passes.length === 0) {
             embed.addFields({ name: 'Status', value: 'No gamepasses linked to this game.' });
         } else {
             const start = page * 5;
             const chunk = passes.slice(start, start + 5);
-            
+
             const pricePromises = chunk.map(async (pass) => {
                 try {
                     const r = await timedFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/product-info`);
@@ -119,7 +121,7 @@ async function getEmbed(data, tab, page) {
                         const d = await r.json();
                         return d.PriceInRobux;
                     }
-                } catch(e) {}
+                } catch (e) { }
                 return null;
             });
             const prices = await Promise.all(pricePromises);
@@ -128,7 +130,7 @@ async function getEmbed(data, tab, page) {
             for (let i = 0; i < chunk.length; i++) {
                 const pass = chunk[i];
                 const priceStr = prices[i] !== null ? `R$${formatNum(prices[i])}` : 'Offsale';
-                desc += `\n**[${pass.name}](https://www.roblox.com/game-pass/${pass.id})**\nPrice: **${priceStr}** · <t:${Math.floor(new Date(pass.created).getTime()/1000)}:d>\n`;
+                desc += `\n**[${pass.name}](https://www.roblox.com/game-pass/${pass.id})**\nPrice: **${priceStr}** · <t:${Math.floor(new Date(pass.created).getTime() / 1000)}:d>\n`;
             }
             embed.setDescription(desc);
         }
@@ -137,24 +139,24 @@ async function getEmbed(data, tab, page) {
         embed.setTitle(`Player Stickiness & Retention`);
         const badges = data.badges;
         const totalVisits = data.kpi?.visits?.current?.value || data.info?.visits || 1;
-        
+
         if (!badges || badges.length === 0) {
             embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo analytics data found (No badges).`);
         } else {
             // Starter badge = highest awarded
-            const starterBadge = badges[0]; 
+            const starterBadge = badges[0];
             const starterAwards = starterBadge.statistics?.awardedCount || 0;
-            
+
             let desc = `**True Drop-off Tracking:**\n*(Percentage of players who kept playing after the first badge)*\n`;
-            
+
             const start = page * 5;
             const chunk = badges.slice(start, start + 5);
-            
+
             for (const badge of chunk) {
                 const awards = badge.statistics?.awardedCount || 0;
                 const apiWinRate = badge.statistics?.winRatePercentage !== undefined ? (badge.statistics.winRatePercentage * 100).toFixed(1) + '%' : 'N/A';
                 const trueRetention = starterAwards > 0 ? ((awards / starterAwards) * 100).toFixed(1) + '%' : 'N/A';
-                
+
                 desc += `\n**${badge.name}**\nRetention: **${trueRetention}** (API: ${apiWinRate})\nAwarded: ${formatNum(awards)}\n`;
             }
             embed.setDescription(desc);
@@ -162,7 +164,7 @@ async function getEmbed(data, tab, page) {
     }
     else if (tab === 'discovery') {
         embed.setTitle(`Market Discovery`);
-        
+
         // Community section — uses pre-cached Discord data
         let communityLines = 'No community data tracked.';
         if (data.discordInviteInfo) {
@@ -189,12 +191,12 @@ async function getEmbed(data, tab, page) {
             { name: 'Community', value: communityLines, inline: false },
             { name: 'Competitors', value: similarLines, inline: false }
         );
-        
+
         if (data.thumbnailUrl) embed.setThumbnail(data.thumbnailUrl);
     }
     else if (tab === 'servers') {
         embed.setTitle(`Server Health Check`);
-        
+
         try {
             const r = await timedFetch(`https://games.roblox.com/v1/games/${data.placeId}/servers/Public?sortOrder=Desc&limit=10`);
             const serverData = await r.json();
@@ -208,7 +210,7 @@ async function getEmbed(data, tab, page) {
                 }
                 embed.setDescription(desc);
             }
-        } catch(e) {
+        } catch (e) {
             embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nFailed to pulse-check servers.`);
         }
     }
@@ -254,7 +256,7 @@ async function fetchGameData(placeId, fetchOpts) {
         const d = await kpiRes.value.json();
         if (d.ok && d.kpiData && d.kpiData.length > 0) Object.assign(dataObj, { kpi: d.kpiData[0] });
     }
-    
+
     if (mediaRes.status === 'fulfilled' && mediaRes.value.ok) {
         const d = await mediaRes.value.json();
         dataObj.media = d.data || [];
@@ -266,7 +268,7 @@ async function fetchGameData(placeId, fetchOpts) {
                     const thumbData = await thumbRes.json();
                     if (thumbData.data && thumbData.data.length > 0) dataObj.thumbnailUrl = thumbData.data[0].imageUrl;
                 }
-            } catch(e) {}
+            } catch (e) { }
         }
     }
 
@@ -288,7 +290,7 @@ async function fetchGameData(placeId, fetchOpts) {
     if (badgeRes.status === 'fulfilled' && badgeRes.value.ok) {
         const d = await badgeRes.value.json();
         if (d.data) {
-            dataObj.badges = d.data.sort((a,b) => (b.statistics?.awardedCount || 0) - (a.statistics?.awardedCount || 0));
+            dataObj.badges = d.data.sort((a, b) => (b.statistics?.awardedCount || 0) - (a.statistics?.awardedCount || 0));
         }
     }
 
@@ -323,7 +325,7 @@ async function handleIntelCommand(interaction) {
     const input = interaction.options.getString('game');
     const placeIdMatch = input.match(/(\d+)/);
     if (!placeIdMatch) return interaction.reply({ content: 'Invalid game link or ID. Please provide a valid place ID.', ephemeral: true });
-    
+
     // Per-user cooldown
     const userId = interaction.user.id;
     const lastUse = userCooldowns.get(userId);
@@ -339,15 +341,16 @@ async function handleIntelCommand(interaction) {
     try {
         const fetchOpts = { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } };
         const dataObj = await fetchGameData(placeId, fetchOpts);
-        
+
         if (!dataObj) return interaction.editReply('Failed to find universe ID for that game.');
 
         const embed = await getEmbed(dataObj, 'general', 0);
         const components = getComponents('general', 0, 1);
-        
+
         const msg = await interaction.editReply({ embeds: [embed], components });
+        dataObj.ownerId = interaction.user.id; // Only command user can click
         intelCache.set(msg.id, dataObj);
-        
+
         setTimeout(() => intelCache.delete(msg.id), DASHBOARD_TTL);
 
     } catch (err) {
@@ -358,9 +361,44 @@ async function handleIntelCommand(interaction) {
 
 // ---- Button handler ----
 async function handleIntelButton(interaction) {
+    const userId = interaction.user.id;
+ 
+    // 1. Per-user Rate Limit
+    const lastClick = buttonCooldowns.get(userId);
+    if (lastClick && Date.now() - lastClick < BUTTON_COOLDOWN) {
+        return interaction.reply({ content: 'Slow down — button rate limit active.', ephemeral: true });
+    }
+    buttonCooldowns.set(userId, Date.now());
+    setTimeout(() => buttonCooldowns.delete(userId), BUTTON_COOLDOWN);
+ 
     const dataObj = intelCache.get(interaction.message.id);
     if (!dataObj) {
-        return interaction.reply({ content: 'This dashboard has expired. Please run the command again.', ephemeral: true });
+        return interaction.reply({ content: 'This dashboard has expired. Please run `/intel` again.', ephemeral: true });
+    }
+ 
+    // 2. Owner-Only Check
+    if (dataObj.ownerId !== userId) {
+        return interaction.reply({ content: 'Only the user who ran the command can use these buttons.', ephemeral: true });
+    }
+ 
+    // 3. 1-Hour Age Check (Force Revert to General)
+    const isTooOld = (Date.now() - interaction.message.createdTimestamp) > 3600000;
+    if (isTooOld) {
+        dataObj.tab = 'general';
+        dataObj.page = 0;
+        const embed = await getEmbed(dataObj, 'general', 0);
+        const components = getComponents('general', 0, 1);
+        
+        await interaction.update({ 
+            embeds: [embed], 
+            components: components.map(row => {
+                row.components.forEach(btn => btn.setDisabled(true));
+                return row;
+            })
+        });
+        
+        intelCache.delete(interaction.message.id);
+        return;
     }
 
     const cid = interaction.customId;
