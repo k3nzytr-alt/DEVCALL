@@ -11,13 +11,14 @@ const GAME_CACHE_TTL = 5 * 60 * 1000;     // 5 min — same game won't re-fetch
 const INVITE_CACHE_TTL = 10 * 60 * 1000;  // 10 min — Discord member counts
 const USER_COOLDOWN = 5 * 1000;            // 5 sec between /intel calls per user
 const BUTTON_COOLDOWN = 1500;              // 1.5 sec between button clicks
-const FETCH_TIMEOUT = 8000;                // 8 sec max per API call
+const FETCH_TIMEOUT = 12000;               // 12 sec max per standard API call
+const BLOXBIZ_TIMEOUT = 25000;             // 25 sec for heavy metadata (dev products)
 const DASHBOARD_TTL = 60 * 60 * 1000;      // 1 hour — dashboard stays interactive
 
 // Timeout-wrapped fetch
-function timedFetch(url, opts = {}) {
+function timedFetch(url, opts = {}, customTimeout = FETCH_TIMEOUT) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const timeout = setTimeout(() => controller.abort(), customTimeout);
     return fetch(url, { ...opts, signal: controller.signal })
         .finally(() => clearTimeout(timeout));
 }
@@ -186,7 +187,9 @@ async function getEmbed(data, tab, page) {
             }
         } else if (subtab === 'products') {
             const products = data.bloxbizProducts || [];
-            if (products.length === 0) {
+            if (data.bloxbizError) {
+                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n⚠️ **Data Fetch Error:** The Superbiz API took too long to respond. This experience may have too many entries to load in one go.`);
+            } else if (products.length === 0) {
                 embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo developer products found.`);
             } else {
                 const start = page * 5;
@@ -296,7 +299,7 @@ async function fetchGameData(placeId, fetchOpts) {
         timedFetch(`https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100`, fetchOpts),
         timedFetch(`https://creatorexchange.io/api/v2/metrics/historical/discord_metrics?universeIds=${universeId}&granularity=DAY&start=${weekAgo}&end=${now}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts),
-        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts)
+        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts, BLOXBIZ_TIMEOUT)
     ]);
 
     const dataObj = {
@@ -355,7 +358,13 @@ async function fetchGameData(placeId, fetchOpts) {
             const d = await bloxbizRes.value.json();
             if (d.data?.game?.gamepasses) dataObj.bloxbizPasses = d.data.game.gamepasses;
             if (d.data?.game?.dev_products) dataObj.bloxbizProducts = d.data.game.dev_products;
-        } catch (e) { }
+        } catch (e) {
+            console.error('[INTEL] Failed to parse Bloxbiz JSON:', e);
+            dataObj.bloxbizError = true;
+        }
+    } else if (bloxbizRes.status === 'rejected' || (bloxbizRes.value && !bloxbizRes.value.ok)) {
+        console.error('[INTEL] Bloxbiz fetch failed or timed out');
+        dataObj.bloxbizError = true;
     }
 
     if (badgeRes.status === 'fulfilled' && badgeRes.value.ok) {
