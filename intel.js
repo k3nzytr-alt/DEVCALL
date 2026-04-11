@@ -33,22 +33,58 @@ function getComponents(tab, page, maxPages) {
             new ButtonBuilder().setCustomId('intel_tab_servers').setLabel('Servers').setStyle(tab === 'servers' ? ButtonStyle.Primary : ButtonStyle.Secondary)
         );
 
+    const row2 = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder().setCustomId('intel_tab_media').setLabel('🖼️ Media').setStyle(tab === 'media' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+        );
+
+    const components = [row1, row2];
+
     // Only show pagination row if we are on a paginated tab and there's more than 1 page
-    if ((tab === 'monetization' || tab === 'retention') && maxPages > 1) {
-        const row2 = new ActionRowBuilder()
+    if ((tab === 'monetization' || tab === 'retention' || tab === 'media') && maxPages > 1) {
+        const row3 = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId('intel_page_prev').setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
                 new ButtonBuilder().setCustomId('intel_page_indicator').setLabel(`Page ${page + 1}/${maxPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
                 new ButtonBuilder().setCustomId('intel_page_next').setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= maxPages - 1)
             );
-        return [row1, row2];
+        components.push(row3);
     }
 
-    return [row1];
+    return components;
 }
 
 const formatNum = (val) => val == null ? 'N/A' : Math.ceil(Number(val)).toLocaleString();
 const formatChange = (change) => change == null ? '' : ` (${change > 0 ? '+' : ''}${Math.ceil(change)}%)`;
+
+// ---- Daily Deterministic Variance ----
+function getDailyVariance(universeId, baseValue) {
+    if (!baseValue) return 0;
+    
+    // Create seed from UniverseID + UTC Date (YYYY-MM-DD)
+    const dateStr = new Date().toISOString().split('T')[0]; 
+    const seedStr = universeId.toString() + "-" + dateStr;
+    
+    // Hash string to 32-bit integer
+    let hash = 0;
+    for (let i = 0; i < seedStr.length; i++) {
+        hash = Math.imul(31, hash) + seedStr.charCodeAt(i) | 0;
+    }
+    
+    // Mulberry32 PRNG logic to get float from 0 to 1
+    let t = hash += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    const rand = ((t ^ t >>> 14) >>> 0) / 4294967296;
+    
+    // Translate random scale to bounds -1.0 to 1.0
+    const multiplier = (rand * 2) - 1;
+    
+    // Max variance scales exponentially to favor smaller amounts with higher padding
+    const maxVariance = Math.pow(baseValue, 0.80); 
+    
+    return Math.floor(multiplier * maxVariance);
+}
 
 // ---- Cached Discord invite lookup ----
 async function getDiscordInviteInfo(inviteCode) {
@@ -87,7 +123,10 @@ async function getEmbed(data, tab, page) {
                 { name: 'Avg Session', value: `${kpi.session_length?.current?.value ? Math.ceil(kpi.session_length.current.value) + 'm' : 'N/A'}${formatChange(kpi.session_length?.week?.percent_change)}`, inline: true }
             );
             if (kpi.revenue?.current?.value) {
-                embed.addFields({ name: 'Daily Avg Revenue (7D)', value: `R$${formatNum(kpi.revenue.current.value)}${formatChange(kpi.revenue?.week?.percent_change)}`, inline: false });
+                const baseRev = kpi.revenue.current.value;
+                const variance = getDailyVariance(data.universeId, baseRev);
+                const variedRev = Math.max(0, baseRev + variance);
+                embed.addFields({ name: 'Daily Avg Revenue (7D)', value: `R$${formatNum(variedRev)}${formatChange(kpi.revenue?.week?.percent_change)}`, inline: false });
             }
         }
 
@@ -137,20 +176,19 @@ async function getEmbed(data, tab, page) {
     }
     else if (tab === 'retention') {
         embed.setTitle(`Player Stickiness & Retention`);
-        const badges = data.badges;
-        const totalVisits = data.kpi?.visits?.current?.value || data.info?.visits || 1;
+        const coreBadges = data.coreBadges || [];
 
-        if (!badges || badges.length === 0) {
-            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo analytics data found (No badges).`);
+        if (coreBadges.length === 0) {
+            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo core progression analytics data found.`);
         } else {
             // Starter badge = highest awarded
-            const starterBadge = badges[0];
+            const starterBadge = coreBadges[0];
             const starterAwards = starterBadge.statistics?.awardedCount || 0;
 
             let desc = `**True Drop-off Tracking:**\n*(Percentage of players who kept playing after the first badge)*\n`;
 
             const start = page * 5;
-            const chunk = badges.slice(start, start + 5);
+            const chunk = coreBadges.slice(start, start + 5);
 
             for (const badge of chunk) {
                 const awards = badge.statistics?.awardedCount || 0;
@@ -214,6 +252,15 @@ async function getEmbed(data, tab, page) {
             embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nFailed to pulse-check servers.`);
         }
     }
+    else if (tab === 'media') {
+        embed.setTitle(`Game Media & Thumbnails`);
+        if (!data.mediaUrls || data.mediaUrls.length === 0) {
+            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo promotional artwork or thumbnails found.`);
+        } else {
+            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nThumbnail **${page + 1}** of **${data.mediaUrls.length}**`);
+            embed.setImage(data.mediaUrls[page]);
+        }
+    }
 
     return embed;
 }
@@ -260,13 +307,22 @@ async function fetchGameData(placeId, fetchOpts) {
     if (mediaRes.status === 'fulfilled' && mediaRes.value.ok) {
         const d = await mediaRes.value.json();
         dataObj.media = d.data || [];
-        const firstImage = dataObj.media.find(m => m.assetType === 'Image');
-        if (firstImage && firstImage.imageId) {
+        
+        const imageIds = dataObj.media.filter(m => m.assetType === 'Image').map(m => m.imageId);
+        dataObj.mediaUrls = [];
+        
+        if (imageIds.length > 0) {
             try {
-                const thumbRes = await timedFetch(`https://thumbnails.roblox.com/v1/assets?assetIds=${firstImage.imageId}&returnPolicy=PlaceHolder&size=768x432&format=Png&isCircular=false`);
+                // Fetch all thumbnails in one bulk request
+                const thumbRes = await timedFetch(`https://thumbnails.roblox.com/v1/assets?assetIds=${imageIds.join(',')}&returnPolicy=PlaceHolder&size=768x432&format=Png&isCircular=false`);
                 if (thumbRes.ok) {
                     const thumbData = await thumbRes.json();
-                    if (thumbData.data && thumbData.data.length > 0) dataObj.thumbnailUrl = thumbData.data[0].imageUrl;
+                    if (thumbData.data) {
+                        dataObj.mediaUrls = thumbData.data.map(t => t.imageUrl).filter(u => u);
+                        if (dataObj.mediaUrls.length > 0) {
+                            dataObj.thumbnailUrl = dataObj.mediaUrls[0]; // Set primary thumbnail
+                        }
+                    }
                 }
             } catch (e) { }
         }
@@ -290,7 +346,14 @@ async function fetchGameData(placeId, fetchOpts) {
     if (badgeRes.status === 'fulfilled' && badgeRes.value.ok) {
         const d = await badgeRes.value.json();
         if (d.data) {
-            dataObj.badges = d.data.sort((a, b) => (b.statistics?.awardedCount || 0) - (a.statistics?.awardedCount || 0));
+            const sortedBadges = d.data.sort((a, b) => (b.statistics?.awardedCount || 0) - (a.statistics?.awardedCount || 0));
+            dataObj.badges = sortedBadges;
+            
+            const eventKeywords = ['event', '2022', '2023', '2024', '2025', '2026', 'hunt', 'classic', 'halloween', 'christmas', 'xmas', 'summer', 'winter', 'easter', 'egg', 'valentine', 'new year', 'holiday'];
+            dataObj.coreBadges = sortedBadges.filter(b => {
+                const nameLower = b.name.toLowerCase();
+                return !eventKeywords.some(k => nameLower.includes(k));
+            });
         }
     }
 
@@ -411,8 +474,17 @@ async function handleIntelButton(interaction) {
         dataObj.page -= 1;
     }
 
-    const listSize = dataObj.tab === 'monetization' ? (dataObj.gamepasses?.length || 0) : (dataObj.tab === 'retention' ? (dataObj.badges?.length || 0) : 0);
-    const maxPages = dataObj.tab === 'discovery' ? 1 : Math.ceil(listSize / 5);
+    let listSize = 0;
+    let itemsPerPage = 5;
+    
+    if (dataObj.tab === 'monetization') listSize = dataObj.gamepasses?.length || 0;
+    else if (dataObj.tab === 'retention') listSize = dataObj.coreBadges?.length || 0;
+    else if (dataObj.tab === 'media') {
+        listSize = dataObj.mediaUrls?.length || 0;
+        itemsPerPage = 1; // Media shows 1 image per page
+    }
+    
+    const maxPages = (dataObj.tab === 'general' || dataObj.tab === 'discovery' || dataObj.tab === 'servers') ? 1 : Math.ceil(listSize / itemsPerPage);
 
     const embed = await getEmbed(dataObj, dataObj.tab, dataObj.page);
     const components = getComponents(dataObj.tab, dataObj.page, maxPages);
