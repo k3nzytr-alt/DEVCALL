@@ -351,8 +351,8 @@ async function fetchGameData(placeId, fetchOpts) {
     if (bloxbizRes.status === 'fulfilled' && bloxbizRes.value.ok) {
         try {
             const d = await bloxbizRes.value.json();
-            if (d.gamepasses) dataObj.bloxbizPasses = d.gamepasses;
-            if (d.dev_products) dataObj.bloxbizProducts = d.dev_products;
+            if (d.data?.game?.gamepasses) dataObj.bloxbizPasses = d.data.game.gamepasses;
+            if (d.data?.game?.dev_products) dataObj.bloxbizProducts = d.data.game.dev_products;
         } catch (e) { }
     }
 
