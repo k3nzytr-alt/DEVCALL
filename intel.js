@@ -188,7 +188,7 @@ async function getEmbed(data, tab, page) {
         } else if (subtab === 'products') {
             const products = data.bloxbizProducts || [];
             if (data.bloxbizError) {
-                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n⚠️ **Data Fetch Error:** The Superbiz API took too long to respond. This experience may have too many entries to load in one go.`);
+                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\ndata fetch error`);
             } else if (products.length === 0) {
                 embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo developer products found.`);
             } else {
@@ -455,7 +455,7 @@ async function handleIntelButton(interaction) {
     // 1. Per-user Rate Limit
     const lastClick = buttonCooldowns.get(userId);
     if (lastClick && Date.now() - lastClick < BUTTON_COOLDOWN) {
-        return interaction.reply({ content: 'Slow down — button rate limit active.', ephemeral: true });
+        return interaction.reply({ content: 'Slow down', ephemeral: true });
     }
     buttonCooldowns.set(userId, Date.now());
     setTimeout(() => buttonCooldowns.delete(userId), BUTTON_COOLDOWN);
