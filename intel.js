@@ -23,32 +23,38 @@ function timedFetch(url, opts = {}) {
 }
 
 // ---- UI Builders ----
-function getComponents(tab, page, maxPages) {
+function getComponents(tab, subtab, page, maxPages) {
     const row1 = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder().setCustomId('intel_tab_general').setLabel('General').setStyle(tab === 'general' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('intel_tab_monetization').setLabel('Monetization').setStyle(tab === 'monetization' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('intel_tab_monetization').setLabel('Monetisation').setStyle(tab === 'monetization' ? ButtonStyle.Primary : ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('intel_tab_retention').setLabel('Retention').setStyle(tab === 'retention' ? ButtonStyle.Primary : ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('intel_tab_discovery').setLabel('Discovery').setStyle(tab === 'discovery' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('intel_tab_servers').setLabel('Servers').setStyle(tab === 'servers' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('intel_tab_media').setLabel('Media').setStyle(tab === 'media' ? ButtonStyle.Primary : ButtonStyle.Secondary)
         );
 
-    const row2 = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder().setCustomId('intel_tab_media').setLabel('🖼️ Media').setStyle(tab === 'media' ? ButtonStyle.Primary : ButtonStyle.Secondary)
-        );
+    const components = [row1];
 
-    const components = [row1, row2];
+    // Monetisation sub-tab row
+    if (tab === 'monetization') {
+        const row2 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder().setCustomId('intel_subtab_passes').setLabel('Gamepasses').setStyle(subtab === 'passes' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('intel_subtab_products').setLabel('Developer Products').setStyle(subtab === 'products' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            );
+        components.push(row2);
+    }
 
-    // Only show pagination row if we are on a paginated tab and there's more than 1 page
-    if ((tab === 'monetization' || tab === 'retention' || tab === 'media') && maxPages > 1) {
-        const row3 = new ActionRowBuilder()
+    // Pagination row
+    const needsPagination = (tab === 'retention' || tab === 'media' || (tab === 'monetization' && subtab)) && maxPages > 1;
+    if (needsPagination) {
+        const paginationRow = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId('intel_page_prev').setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
                 new ButtonBuilder().setCustomId('intel_page_indicator').setLabel(`Page ${page + 1}/${maxPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
                 new ButtonBuilder().setCustomId('intel_page_next').setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= maxPages - 1)
             );
-        components.push(row3);
+        components.push(paginationRow);
     }
 
     return components;
@@ -109,7 +115,8 @@ async function getDiscordInviteInfo(inviteCode) {
 
 // ---- Embed Generator ----
 async function getEmbed(data, tab, page) {
-    const embed = new EmbedBuilder().setColor(tab === 'general' ? '#00A2FF' : (tab === 'monetization' ? '#ffcc00' : (tab === 'retention' ? '#ff3366' : (tab === 'discovery' ? '#9d00ff' : '#22ff00'))));
+    const subtab = data.subtab || null;
+    const embed = new EmbedBuilder().setColor(tab === 'general' ? '#00A2FF' : (tab === 'monetization' ? '#ffcc00' : (tab === 'retention' ? '#ff3366' : (tab === 'discovery' ? '#9d00ff' : (tab === 'media' ? '#22ff00' : '#ffffff')))));
 
     if (tab === 'general') {
         embed.setTitle(`DevCall$ Intel: ${data.info?.name || 'Unknown'}`);
@@ -143,35 +150,52 @@ async function getEmbed(data, tab, page) {
         if (data.thumbnailUrl) embed.setImage(data.thumbnailUrl);
     }
     else if (tab === 'monetization') {
-        embed.setTitle(`Monetization Breakdown`);
-        embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})`);
+        embed.setTitle(`Monetisation Breakdown`);
 
-        const passes = data.gamepasses;
-        if (!passes || passes.length === 0) {
-            embed.addFields({ name: 'Status', value: 'No gamepasses linked to this game.' });
-        } else {
-            const start = page * 5;
-            const chunk = passes.slice(start, start + 5);
+        // Revenue header — always shown
+        const kpi = data.kpi;
+        if (kpi?.revenue?.current?.value) {
+            const baseRev = kpi.revenue.current.value;
+            const variance = getDailyVariance(data.universeId, baseRev);
+            const variedRev = Math.max(0, baseRev + variance);
+            embed.addFields({ name: 'Daily Avg Revenue (7D)', value: `R$${formatNum(variedRev)}${formatChange(kpi.revenue?.week?.percent_change)}`, inline: false });
+        }
 
-            const pricePromises = chunk.map(async (pass) => {
-                try {
-                    const r = await timedFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/product-info`);
-                    if (r.ok) {
-                        const d = await r.json();
-                        return d.PriceInRobux;
-                    }
-                } catch (e) { }
-                return null;
-            });
-            const prices = await Promise.all(pricePromises);
-
-            let desc = `**Found ${passes.length} Assets:**\n`;
-            for (let i = 0; i < chunk.length; i++) {
-                const pass = chunk[i];
-                const priceStr = prices[i] !== null ? `R$${formatNum(prices[i])}` : 'Offsale';
-                desc += `\n**[${pass.name}](https://www.roblox.com/game-pass/${pass.id})**\nPrice: **${priceStr}** · <t:${Math.floor(new Date(pass.created).getTime() / 1000)}:d>\n`;
+        if (!subtab) {
+            // Overview — no sub-tab selected yet
+            const passCount = data.bloxbizPasses?.length ?? data.gamepasses?.length ?? 0;
+            const productCount = data.bloxbizProducts?.length ?? 0;
+            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n**${passCount}** Gamepasses · **${productCount}** Developer Products\n\n*Select a category below ↓*`);
+        } else if (subtab === 'passes') {
+            const passes = data.bloxbizPasses?.length > 0 ? data.bloxbizPasses : data.gamepasses || [];
+            if (passes.length === 0) {
+                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo gamepasses found.`);
+            } else {
+                const start = page * 5;
+                const chunk = passes.slice(start, start + 5);
+                let desc = `**${passes.length} Gamepass${passes.length !== 1 ? 'es' : ''}:**\n`;
+                for (const pass of chunk) {
+                    const price = pass.price != null ? `R$${formatNum(pass.price)}` : (pass.PriceInRobux != null ? `R$${formatNum(pass.PriceInRobux)}` : 'Offsale');
+                    const created = pass.created ? `<t:${Math.floor(new Date(pass.created).getTime() / 1000)}:d>` : '';
+                    const id = pass.id || pass.gamePassId;
+                    desc += `\n**${id ? `[${pass.name}](https://www.roblox.com/game-pass/${id})` : pass.name}**\nPrice: **${price}**${created ? ` · ${created}` : ''}\n`;
+                }
+                embed.setDescription(desc);
             }
-            embed.setDescription(desc);
+        } else if (subtab === 'products') {
+            const products = data.bloxbizProducts || [];
+            if (products.length === 0) {
+                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo developer products found.`);
+            } else {
+                const start = page * 5;
+                const chunk = products.slice(start, start + 5);
+                let desc = `**${products.length} Developer Product${products.length !== 1 ? 's' : ''}:**\n`;
+                for (const p of chunk) {
+                    const price = p.price != null ? `R$${formatNum(p.price)}` : (p.price_in_robux != null ? `R$${formatNum(p.price_in_robux)}` : 'N/A');
+                    desc += `\n**${p.name}**\nPrice: **${price}**\n`;
+                }
+                embed.setDescription(desc);
+            }
         }
     }
     else if (tab === 'retention') {
@@ -232,26 +256,6 @@ async function getEmbed(data, tab, page) {
 
         if (data.thumbnailUrl) embed.setThumbnail(data.thumbnailUrl);
     }
-    else if (tab === 'servers') {
-        embed.setTitle(`Server Health Check`);
-
-        try {
-            const r = await timedFetch(`https://games.roblox.com/v1/games/${data.placeId}/servers/Public?sortOrder=Desc&limit=10`);
-            const serverData = await r.json();
-            if (!serverData.data || serverData.data.length === 0) {
-                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nGhost town. No active servers found.`);
-            } else {
-                let desc = `[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n**Top 5 Clusters:**`;
-                const top5 = serverData.data.slice(0, 5);
-                for (const srv of top5) {
-                    desc += `\n\n**Server:** \`${srv.id.substring(0, 8)}\`\nStatus: **${srv.playing}/${srv.maxPlayers} players**\nDiagnostics: **${srv.ping}ms** / **${Math.ceil(srv.fps)} FPS**`;
-                }
-                embed.setDescription(desc);
-            }
-        } catch (e) {
-            embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nFailed to pulse-check servers.`);
-        }
-    }
     else if (tab === 'media') {
         embed.setTitle(`Game Media & Thumbnails`);
         if (!data.mediaUrls || data.mediaUrls.length === 0) {
@@ -281,7 +285,7 @@ async function fetchGameData(placeId, fetchOpts) {
 
     const now = new Date().toISOString();
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [kpiRes, mediaRes, infoRes, voteRes, passRes, badgeRes, discordRes, simRes] = await Promise.allSettled([
+    const [kpiRes, mediaRes, infoRes, voteRes, passRes, badgeRes, discordRes, simRes, bloxbizRes] = await Promise.allSettled([
         timedFetch(`https://api.creatorexchange.io/v2/metrics/latest/kpi_trends?universeIds=${universeId}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v2/games/${universeId}/media`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`, fetchOpts),
@@ -289,7 +293,8 @@ async function fetchGameData(placeId, fetchOpts) {
         timedFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?limit=100`, fetchOpts),
         timedFetch(`https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100`, fetchOpts),
         timedFetch(`https://creatorexchange.io/api/v2/metrics/historical/discord_metrics?universeIds=${universeId}&granularity=DAY&start=${weekAgo}&end=${now}`, fetchOpts),
-        timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts)
+        timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts),
+        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts)
     ]);
 
     const dataObj = {
@@ -341,6 +346,14 @@ async function fetchGameData(placeId, fetchOpts) {
     if (passRes.status === 'fulfilled' && passRes.value.ok) {
         const d = await passRes.value.json();
         if (d.gamePasses) dataObj.gamepasses = d.gamePasses;
+    }
+
+    if (bloxbizRes.status === 'fulfilled' && bloxbizRes.value.ok) {
+        try {
+            const d = await bloxbizRes.value.json();
+            if (d.gamepasses) dataObj.bloxbizPasses = d.gamepasses;
+            if (d.dev_products) dataObj.bloxbizProducts = d.dev_products;
+        } catch (e) { }
     }
 
     if (badgeRes.status === 'fulfilled' && badgeRes.value.ok) {
@@ -408,7 +421,7 @@ async function handleIntelCommand(interaction) {
         if (!dataObj) return interaction.editReply('Failed to find universe ID for that game.');
 
         const embed = await getEmbed(dataObj, 'general', 0);
-        const components = getComponents('general', 0, 1);
+        const components = getComponents('general', null, 0, 1);
 
         const msg = await interaction.editReply({ embeds: [embed], components });
         dataObj.ownerId = interaction.user.id; // Only command user can click
@@ -450,7 +463,7 @@ async function handleIntelButton(interaction) {
         dataObj.tab = 'general';
         dataObj.page = 0;
         const embed = await getEmbed(dataObj, 'general', 0);
-        const components = getComponents('general', 0, 1);
+        const components = getComponents('general', null, 0, 1);
         
         await interaction.update({ 
             embeds: [embed], 
@@ -467,7 +480,12 @@ async function handleIntelButton(interaction) {
     const cid = interaction.customId;
     if (cid.startsWith('intel_tab_')) {
         dataObj.tab = cid.replace('intel_tab_', '');
-        dataObj.page = 0; // Reset page on tab switch
+        // Default monetization to gamepasses sub-tab immediately
+        dataObj.subtab = dataObj.tab === 'monetization' ? 'passes' : null;
+        dataObj.page = 0;
+    } else if (cid.startsWith('intel_subtab_')) {
+        dataObj.subtab = cid.replace('intel_subtab_', '');
+        dataObj.page = 0; // Reset page on subtab switch
     } else if (cid === 'intel_page_next') {
         dataObj.page += 1;
     } else if (cid === 'intel_page_prev') {
@@ -476,18 +494,24 @@ async function handleIntelButton(interaction) {
 
     let listSize = 0;
     let itemsPerPage = 5;
-    
-    if (dataObj.tab === 'monetization') listSize = dataObj.gamepasses?.length || 0;
-    else if (dataObj.tab === 'retention') listSize = dataObj.coreBadges?.length || 0;
-    else if (dataObj.tab === 'media') {
+
+    if (dataObj.tab === 'monetization') {
+        if (dataObj.subtab === 'passes') {
+            listSize = dataObj.bloxbizPasses?.length ?? dataObj.gamepasses?.length ?? 0;
+        } else if (dataObj.subtab === 'products') {
+            listSize = dataObj.bloxbizProducts?.length ?? 0;
+        }
+    } else if (dataObj.tab === 'retention') {
+        listSize = dataObj.coreBadges?.length || 0;
+    } else if (dataObj.tab === 'media') {
         listSize = dataObj.mediaUrls?.length || 0;
-        itemsPerPage = 1; // Media shows 1 image per page
+        itemsPerPage = 1;
     }
-    
-    const maxPages = (dataObj.tab === 'general' || dataObj.tab === 'discovery' || dataObj.tab === 'servers') ? 1 : Math.ceil(listSize / itemsPerPage);
+
+    const maxPages = (dataObj.tab === 'general' || dataObj.tab === 'discovery' || (dataObj.tab === 'monetization' && !dataObj.subtab)) ? 1 : Math.ceil(listSize / itemsPerPage);
 
     const embed = await getEmbed(dataObj, dataObj.tab, dataObj.page);
-    const components = getComponents(dataObj.tab, dataObj.page, maxPages);
+    const components = getComponents(dataObj.tab, dataObj.subtab, dataObj.page, maxPages);
 
     await interaction.update({ embeds: [embed], components });
 }
