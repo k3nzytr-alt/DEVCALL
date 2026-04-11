@@ -107,6 +107,8 @@ async function getDiscordInviteInfo(inviteCode) {
                 timestamp: Date.now()
             };
             discordInviteCache.set(inviteCode, info);
+            // Memory Leak Fix: Auto-evict from cache
+            setTimeout(() => discordInviteCache.delete(inviteCode), INVITE_CACHE_TTL);
             return info;
         }
     } catch (e) { }
@@ -410,6 +412,8 @@ async function handleIntelCommand(interaction) {
         return interaction.reply({ content: `Slow down — try again in ${wait}s.`, ephemeral: true });
     }
     userCooldowns.set(userId, Date.now());
+    // Memory Leak Fix: Auto-evict from map
+    setTimeout(() => userCooldowns.delete(userId), USER_COOLDOWN);
 
     const placeId = placeIdMatch[1];
     await interaction.deferReply();

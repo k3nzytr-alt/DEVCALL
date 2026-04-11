@@ -8,19 +8,28 @@ if (!fs.existsSync(dataFile)) {
     fs.writeFileSync(dataFile, JSON.stringify({ warnings: {} }, null, 2));
 }
 
+// In-memory cache for better performance under traffic
+let _cache = null;
+
 function loadData() {
+    if (_cache) return _cache;
     try {
         const data = fs.readFileSync(dataFile, 'utf8');
-        return JSON.parse(data);
+        _cache = JSON.parse(data);
+        return _cache;
     } catch (err) {
         console.error("Error loading data:", err);
-        return { warnings: {} };
+        _cache = { warnings: {} };
+        return _cache;
     }
 }
 
-function saveData(data) {
+function saveData() {
+    if (!_cache) return;
     try {
-        fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+        // Use synchronous write here to ensure data integrity, but since we are cached, 
+        // we only call this when something actually changes.
+        fs.writeFileSync(dataFile, JSON.stringify(_cache, null, 2));
     } catch (err) {
         console.error("Error saving data:", err);
     }
@@ -33,7 +42,7 @@ module.exports = {
             data.warnings[userId] = [];
         }
         data.warnings[userId].push({ reason, date: new Date().toISOString() });
-        saveData(data);
+        saveData();
     },
     getWarnings: (userId) => {
         const data = loadData();
@@ -43,7 +52,7 @@ module.exports = {
         const data = loadData();
         if (data.warnings[userId]) {
             delete data.warnings[userId];
-            saveData(data);
+            saveData();
             return true;
         }
         return false;

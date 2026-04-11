@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ActivityType, PermissionFlagsBits } = require('discord.js');
 const commandDefinitions = require('./commands.js');
 const db = require('./database.js');
 const intel = require('./intel.js');
@@ -18,6 +18,7 @@ const ALLOWED_GUILDS = new Set([
     '1491889701882302614',
     '1394258598082904209'
 ]);
+const INTEL_CHANNEL_ID = '1492102057958834216';
 
 // --- Owner Lock ---
 const OWNER_ID = '953039971172904980';
@@ -131,10 +132,20 @@ client.on('interactionCreate', async interaction => {
     const executor = await guild.members.fetch(interaction.user.id).catch(() => null);
     if (!executor) return;
 
-    const isAuthorized = isOwner || executor.roles.cache.some(role => {
+    const isAuthorized = isOwner || executor.permissions.has(PermissionFlagsBits.Administrator) || executor.roles.cache.some(role => {
         const rName = role.name.toLowerCase();
         return rName === 'staff' || rName === 'admin';
     });
+
+    // --- /intel Channel Restriction ---
+    if (commandName === 'intel' && !isAuthorized) {
+        if (interaction.channelId !== INTEL_CHANNEL_ID) {
+            return interaction.reply({ 
+                content: `🚫 **Restricted:** The \`/intel\` command can only be used in <#${INTEL_CHANNEL_ID}>.`, 
+                ephemeral: true 
+            });
+        }
+    }
 
     if (!isAuthorized && commandName !== 'intel') {
         return interaction.reply({ 
