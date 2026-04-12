@@ -166,12 +166,14 @@ async function getEmbed(data, tab, page) {
 
         if (!subtab) {
             // Overview — no sub-tab selected yet
-            const passCount = data.bloxbizPasses?.length ?? data.gamepasses?.length ?? 0;
+            const passCount = data.bloxbizPasses?.length ?? 0;
             const productCount = data.bloxbizProducts?.length ?? 0;
             embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\n**${passCount}** Gamepasses · **${productCount}** Developer Products\n\n*Select a category below ↓*`);
         } else if (subtab === 'passes') {
-            const passes = data.bloxbizPasses?.length > 0 ? data.bloxbizPasses : data.gamepasses || [];
-            if (passes.length === 0) {
+            const passes = data.bloxbizPasses || [];
+            if (data.bloxbizError) {
+                embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\ndata fetch error`);
+            } else if (passes.length === 0) {
                 embed.setDescription(`[Visit Game](https://www.roblox.com/games/${data.placeId})\n\nNo gamepasses found.`);
             } else {
                 const start = page * 5;
@@ -290,12 +292,11 @@ async function fetchGameData(placeId, fetchOpts) {
 
     const now = new Date().toISOString();
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [kpiRes, mediaRes, infoRes, voteRes, passRes, badgeRes, discordRes, simRes, bloxbizRes] = await Promise.allSettled([
+    const [kpiRes, mediaRes, infoRes, voteRes, badgeRes, discordRes, simRes, bloxbizRes] = await Promise.allSettled([
         timedFetch(`https://api.creatorexchange.io/v2/metrics/latest/kpi_trends?universeIds=${universeId}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v2/games/${universeId}/media`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games/votes?universeIds=${universeId}`, fetchOpts),
-        timedFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?limit=100`, fetchOpts),
         timedFetch(`https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100`, fetchOpts),
         timedFetch(`https://creatorexchange.io/api/v2/metrics/historical/discord_metrics?universeIds=${universeId}&granularity=DAY&start=${weekAgo}&end=${now}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts),
@@ -346,11 +347,6 @@ async function fetchGameData(placeId, fetchOpts) {
     if (voteRes.status === 'fulfilled' && voteRes.value.ok) {
         const d = await voteRes.value.json();
         if (d.data?.length > 0) dataObj.votes = d.data[0];
-    }
-
-    if (passRes.status === 'fulfilled' && passRes.value.ok) {
-        const d = await passRes.value.json();
-        if (d.gamePasses) dataObj.gamepasses = d.gamePasses;
     }
 
     if (bloxbizRes.status === 'fulfilled' && bloxbizRes.value.ok) {
@@ -510,7 +506,7 @@ async function handleIntelButton(interaction) {
 
     if (dataObj.tab === 'monetization') {
         if (dataObj.subtab === 'passes') {
-            listSize = dataObj.bloxbizPasses?.length ?? dataObj.gamepasses?.length ?? 0;
+            listSize = dataObj.bloxbizPasses?.length ?? 0;
         } else if (dataObj.subtab === 'products') {
             listSize = dataObj.bloxbizProducts?.length ?? 0;
         }
