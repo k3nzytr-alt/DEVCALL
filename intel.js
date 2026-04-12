@@ -352,8 +352,17 @@ async function fetchGameData(placeId, fetchOpts) {
     if (bloxbizRes.status === 'fulfilled' && bloxbizRes.value.ok) {
         try {
             const d = await bloxbizRes.value.json();
-            if (d.data?.game?.gamepasses) dataObj.bloxbizPasses = d.data.game.gamepasses;
-            if (d.data?.game?.dev_products) dataObj.bloxbizProducts = d.data.game.dev_products;
+            if (d.data?.game?.gamepasses) {
+                // Filter out off-sale and sort by price descending
+                dataObj.bloxbizPasses = d.data.game.gamepasses
+                    .filter(p => p.price != null || p.PriceInRobux != null)
+                    .sort((a, b) => (b.price ?? b.PriceInRobux ?? 0) - (a.price ?? a.PriceInRobux ?? 0));
+            }
+            if (d.data?.game?.dev_products) {
+                dataObj.bloxbizProducts = d.data.game.dev_products
+                    .filter(p => p.for_sale !== false && (p.price != null || p.price_in_robux != null))
+                    .sort((a, b) => (b.price ?? b.price_in_robux ?? 0) - (a.price ?? a.price_in_robux ?? 0));
+            }
         } catch (e) {
             console.error('[INTEL] Failed to parse Bloxbiz JSON:', e);
             dataObj.bloxbizError = true;
