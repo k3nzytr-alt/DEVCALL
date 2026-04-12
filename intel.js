@@ -140,6 +140,23 @@ async function getEmbed(data, tab, page) {
             }
         }
 
+        if (data.rankMetrics) {
+            const topEarning = data.rankMetrics.find(r => r.id === 'TopEarning');
+            if (topEarning && topEarning.latest_rank) {
+                embed.addFields({ name: 'Top Earning Placement', value: `#${topEarning.latest_rank}`, inline: true });
+            }
+            
+            const otherCharts = data.rankMetrics
+                .filter(r => r.id !== 'TopEarning' && r.latest_rank && r.latest_rank <= 100)
+                .sort((a, b) => a.latest_rank - b.latest_rank)
+                .slice(0, 3);
+                
+            if (otherCharts.length > 0) {
+                const lines = otherCharts.map(r => `**#${r.latest_rank}** — ${r.name}`).join('\n');
+                embed.addFields({ name: 'Top Chart Placements', value: lines, inline: true });
+            }
+        }
+
         if (data.votes) {
             const total = data.votes.upVotes + data.votes.downVotes;
             const ratio = total > 0 ? Math.ceil((data.votes.upVotes / total) * 100) : 0;
@@ -300,7 +317,7 @@ async function fetchGameData(placeId, fetchOpts) {
         timedFetch(`https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100`, fetchOpts),
         timedFetch(`https://creatorexchange.io/api/v2/metrics/historical/discord_metrics?universeIds=${universeId}&granularity=DAY&start=${weekAgo}&end=${now}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts),
-        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts, BLOXBIZ_TIMEOUT)
+        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses,rank_metrics`, fetchOpts, BLOXBIZ_TIMEOUT)
     ]);
 
     const dataObj = {
@@ -354,6 +371,7 @@ async function fetchGameData(placeId, fetchOpts) {
             const d = await bloxbizRes.value.json();
             if (d.data?.game?.gamepasses) dataObj.bloxbizPasses = d.data.game.gamepasses;
             if (d.data?.game?.dev_products) dataObj.bloxbizProducts = d.data.game.dev_products;
+            if (d.data?.rank_metrics) dataObj.rankMetrics = d.data.rank_metrics;
         } catch (e) {
             console.error('[INTEL] Failed to parse Bloxbiz JSON:', e);
             dataObj.bloxbizError = true;
