@@ -389,8 +389,16 @@ const MARKET_CHANNELS = {
     '1395373355552608348': { type: 'ccuGate', minCcu: 100 } // low ccu
 };
 
-const MARKET_COOLDOWN = 15000; // 15 seconds
+const MARKET_COOLDOWN = 5000; // 5 seconds
 const marketCooldowns = new Map();
+
+// Global sweep for market cooldowns to reduce event loop pressure
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, timestamp] of marketCooldowns.entries()) {
+        if (now - timestamp >= MARKET_COOLDOWN) marketCooldowns.delete(userId);
+    }
+}, 5000);
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
@@ -410,13 +418,11 @@ client.on('messageCreate', async message => {
     if (lastUse && Date.now() - lastUse < MARKET_COOLDOWN) {
         await message.delete().catch(() => {});
         const waitTime = Math.ceil((MARKET_COOLDOWN - (Date.now() - lastUse)) / 1000);
-        const replyMsg = await message.channel.send(`🛑 <@${message.author.id}>, **Spam Protection:** Please wait ${waitTime}s before posting another game link.\n*(This message will delete in 10 seconds)*`).catch(() => null);
-        if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 10000);
+        const replyMsg = await message.channel.send(`🛑 <@${message.author.id}>, **Spam Protection:** Please wait ${waitTime}s before posting another game link.\n*(This message will delete in 5 seconds)*`).catch(() => null);
+        if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 5000);
         return;
     }
     marketCooldowns.set(userId, Date.now());
-    // Auto-cleanup map to prevent memory leaks over time
-    setTimeout(() => marketCooldowns.delete(userId), MARKET_COOLDOWN);
     
     const fetchOpts = { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } };
     
@@ -427,7 +433,7 @@ client.on('messageCreate', async message => {
             // Security: Prevent bypassing CCU requirements by posting invalid/broken links
             if (channelRule.type === 'ccuGate') {
                 await message.delete().catch(() => {});
-                const replyMsg = await message.channel.send(`Hey <@${message.author.id}>, your listing was removed because we couldn't verify the game's data. Ensure it's a valid Roblox game link.\n*(This message will delete in 30 seconds)*`).catch(() => null);
+                const replyMsg = await message.channel.send(`Hey <@${message.author.id}>, your listing was removed because we couldn't verify the game's data. Ensure it's a valid Roblox game link.\n*(This message will delete in 15 seconds)*`).catch(() => null);
                 if (replyMsg) setTimeout(() => replyMsg.delete().catch(() => {}), 30000);
             }
             return;

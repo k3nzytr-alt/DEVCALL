@@ -9,11 +9,32 @@ const buttonCooldowns = new Map();  // userId -> timestamp (buttons)
 
 const GAME_CACHE_TTL = 5 * 60 * 1000;     // 5 min — same game won't re-fetch
 const INVITE_CACHE_TTL = 10 * 60 * 1000;  // 10 min — Discord member counts
-const USER_COOLDOWN = 5 * 1000;            // 5 sec between /intel calls per user
+const USER_COOLDOWN = 3 * 1000;            // 3 sec between /intel calls per user
 const BUTTON_COOLDOWN = 1500;              // 1.5 sec between button clicks
 const FETCH_TIMEOUT = 12000;               // 12 sec max per standard API call
 const BLOXBIZ_TIMEOUT = 25000;             // 25 sec for heavy metadata (dev products)
-const DASHBOARD_TTL = 60 * 60 * 1000;      // 1 hour — dashboard stays interactive
+const DASHBOARD_TTL = 15 * 60 * 1000;      // 15 min — dash memory lifetime
+
+// --- Global Cache Sweeping ---
+// Replaces thousands of inline setTimeouts under high traffic to prevent memory leaks / event loop overload
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of gameDataCache.entries()) {
+        if (now - val.timestamp >= GAME_CACHE_TTL) gameDataCache.delete(key);
+    }
+    for (const [key, val] of discordInviteCache.entries()) {
+        if (now - val.timestamp >= INVITE_CACHE_TTL) discordInviteCache.delete(key);
+    }
+    for (const [key, timestamp] of userCooldowns.entries()) {
+        if (now - timestamp >= USER_COOLDOWN) userCooldowns.delete(key);
+    }
+    for (const [key, timestamp] of buttonCooldowns.entries()) {
+        if (now - timestamp >= BUTTON_COOLDOWN) buttonCooldowns.delete(key);
+    }
+    for (const [key, val] of intelCache.entries()) {
+        if (now - val.timestamp >= DASHBOARD_TTL) intelCache.delete(key);
+    }
+}, 30000); // Sweep every 30s
 
 // Timeout-wrapped fetch
 function timedFetch(url, opts = {}, customTimeout = FETCH_TIMEOUT) {
@@ -108,8 +129,7 @@ async function getDiscordInviteInfo(inviteCode) {
                 timestamp: Date.now()
             };
             discordInviteCache.set(inviteCode, info);
-            // Memory Leak Fix: Auto-evict from cache
-            setTimeout(() => discordInviteCache.delete(inviteCode), INVITE_CACHE_TTL);
+            // Swept globally
             return info;
         }
     } catch (e) { }
@@ -353,14 +373,12 @@ async function fetchGameData(placeId, fetchOpts) {
         try {
             const d = await bloxbizRes.value.json();
             if (d.data?.game?.gamepasses) {
-                // Filter out off-sale and sort by price descending
+                // Sort by price descending
                 dataObj.bloxbizPasses = d.data.game.gamepasses
-                    .filter(p => p.price != null || p.PriceInRobux != null)
                     .sort((a, b) => (b.price ?? b.PriceInRobux ?? 0) - (a.price ?? a.PriceInRobux ?? 0));
             }
             if (d.data?.game?.dev_products) {
                 dataObj.bloxbizProducts = d.data.game.dev_products
-                    .filter(p => p.for_sale !== false && (p.price != null || p.price_in_robux != null))
                     .sort((a, b) => (b.price ?? b.price_in_robux ?? 0) - (a.price ?? a.price_in_robux ?? 0));
             }
         } catch (e) {
@@ -406,8 +424,7 @@ async function fetchGameData(placeId, fetchOpts) {
     // Store in game data cache
     gameDataCache.set(universeId, { data: { ...dataObj }, timestamp: Date.now() });
 
-    // Auto-evict after TTL to prevent memory leaks
-    setTimeout(() => gameDataCache.delete(universeId), GAME_CACHE_TTL);
+    // Swept globally
 
     return dataObj;
 }
@@ -426,8 +443,7 @@ async function handleIntelCommand(interaction) {
         return interaction.reply({ content: `Slow down — try again in ${wait}s.`, ephemeral: true });
     }
     userCooldowns.set(userId, Date.now());
-    // Memory Leak Fix: Auto-evict from map
-    setTimeout(() => userCooldowns.delete(userId), USER_COOLDOWN);
+    // Swept globally
 
     const placeId = placeIdMatch[1];
     await interaction.deferReply();
@@ -443,9 +459,10 @@ async function handleIntelCommand(interaction) {
 
         const msg = await interaction.editReply({ embeds: [embed], components });
         dataObj.ownerId = interaction.user.id; // Only command user can click
+        dataObj.timestamp = Date.now(); // Used by global sweeper
         intelCache.set(msg.id, dataObj);
 
-        setTimeout(() => intelCache.delete(msg.id), DASHBOARD_TTL);
+        // Swept globally
 
     } catch (err) {
         console.error(err);
@@ -463,7 +480,7 @@ async function handleIntelButton(interaction) {
         return interaction.reply({ content: 'Slow down', ephemeral: true });
     }
     buttonCooldowns.set(userId, Date.now());
-    setTimeout(() => buttonCooldowns.delete(userId), BUTTON_COOLDOWN);
+    // Swept globally
  
     const dataObj = intelCache.get(interaction.message.id);
     if (!dataObj) {
@@ -475,8 +492,8 @@ async function handleIntelButton(interaction) {
         return interaction.reply({ content: 'Only the user who ran the command can use these buttons.', ephemeral: true });
     }
  
-    // 3. 1-Hour Age Check (Force Revert to General)
-    const isTooOld = (Date.now() - interaction.message.createdTimestamp) > 3600000;
+    // 3. 15-Minute Age Check (Force Revert to General)
+    const isTooOld = (Date.now() - interaction.message.createdTimestamp) > DASHBOARD_TTL;
     if (isTooOld) {
         dataObj.tab = 'general';
         dataObj.page = 0;
