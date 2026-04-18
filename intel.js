@@ -385,22 +385,26 @@ async function fetchGameData(placeId, fetchOpts) {
 
     if (bloxbizRes.status === 'fulfilled' && bloxbizRes.value.ok) {
         try {
-            const d = await bloxbizRes.value.json();
-            if (d.data?.game?.gamepasses) {
-                // Sort by price descending
-                dataObj.bloxbizPasses = d.data.game.gamepasses
-                    .sort((a, b) => (b.price ?? b.PriceInRobux ?? 0) - (a.price ?? a.PriceInRobux ?? 0));
-            }
-            if (d.data?.game?.dev_products) {
-                dataObj.bloxbizProducts = d.data.game.dev_products
-                    .sort((a, b) => (b.price ?? b.price_in_robux ?? 0) - (a.price ?? a.price_in_robux ?? 0));
+            const textResponse = await bloxbizRes.value.text();
+            const d = JSON.parse(textResponse);
+            if (d.success && d.data?.game) {
+                if (Array.isArray(d.data.game.gamepasses)) {
+                    dataObj.bloxbizPasses = d.data.game.gamepasses
+                        .slice()
+                        .sort((a, b) => (b.price ?? b.PriceInRobux ?? 0) - (a.price ?? a.PriceInRobux ?? 0));
+                }
+                if (Array.isArray(d.data.game.dev_products)) {
+                    dataObj.bloxbizProducts = d.data.game.dev_products
+                        .slice()
+                        .sort((a, b) => (b.price ?? b.price_in_robux ?? 0) - (a.price ?? a.price_in_robux ?? 0));
+                }
             }
         } catch (e) {
-            console.error('[INTEL] Failed to parse Bloxbiz JSON:', e);
+            console.error('[INTEL] Failed to parse Bloxbiz JSON:', e.stack || e);
             dataObj.bloxbizError = true;
         }
     } else if (bloxbizRes.status === 'rejected' || (bloxbizRes.value && !bloxbizRes.value.ok)) {
-        console.error('[INTEL] Bloxbiz fetch failed or timed out');
+        console.error('[INTEL] Bloxbiz fetch failed with reject/not ok');
         dataObj.bloxbizError = true;
     }
 

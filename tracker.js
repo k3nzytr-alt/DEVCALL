@@ -85,80 +85,83 @@ async function checkTrackedAccount(client, userId) {
         }
 
         const channel = await client.channels.fetch(TRACKER_CHANNEL_ID).catch(() => null);
-        if (!channel) return;
-
-        // 3. Loop through their groups
+        // 3. Collect all groups they are heavily ranked in at this snapshot
+        const activeGroupMap = new Map();
         for (const group of groupsData.data) {
-            const role = group.role;
-            const groupInfo = group.group;
-
-            // Only track if rank > 1 (Above generic normal member)
-            if (role.rank > 1) {
-                // Check if we already alerted this combo
-                if (!db.hasTrackedAlert(userId, groupInfo.id)) {
-
-                    // Fetch group's games
-                    let gamesList = [];
-                    try {
-                        const gamesData = await fetchWithRetry(`https://games.roblox.com/v2/groups/${groupInfo.id}/games?accessFilter=Public&sortOrder=Asc&limit=10`);
-                        if (gamesData && gamesData.data) {
-                            gamesList = gamesData.data;
-                        }
-                    } catch (e) {
-                        console.error(`Failed to fetch games for group ${groupInfo.id}`);
-                    }
-
-                    // Fetch Group Logo
-                    let groupIconUrl = null;
-                    try {
-                        const iconData = await fetchWithRetry(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupInfo.id}&size=150x150&format=Png&isCircular=false`);
-                        if (iconData && iconData.data && iconData.data.length > 0) {
-                            groupIconUrl = iconData.data[0].imageUrl;
-                        }
-                    } catch (e) {
-                        console.error(`Failed to fetch group icon for ${groupInfo.id}`);
-                    }
-
-                    // Build Embed
-                    const embed = new EmbedBuilder()
-                        .setColor('#ffcc00')
-                        .setAuthor({ name: 'Acquisition Tracker', iconURL: headshotUrl || undefined })
-                        .setTitle(`${username} was ranked in a Group!`)
-                        .setThumbnail(groupIconUrl || undefined)
-                        .setDescription(`**Group:** [${groupInfo.name}](https://www.roblox.com/groups/${groupInfo.id})\n**Added Rank:** \`${role.name}\` (Rank: ${role.rank})\n**Member Count:** ${groupInfo.memberCount.toLocaleString()}`)
-                        .setTimestamp();
-
-                    if (gamesList.length > 0) {
-                        let gamesText = '';
-                        // Sort by CCU just in case
-                        gamesList.sort((a, b) => (b.playing || 0) - (a.playing || 0));
-
-                        const topGames = gamesList.slice(0, 5); // Take top 5 to avoid overly huge embeds
-                        for (const game of topGames) {
-                            const ccu = (game.playing || 0).toLocaleString();
-                            const visits = (game.placeVisits || 0).toLocaleString();
-                            gamesText += `🎮 [${game.name}](https://www.roblox.com/games/${game.rootPlace.id}) - 👥 ${ccu} CCU ( ${visits} visits)\n`;
-                        }
-
-                        if (gamesList.length > 5) {
-                            gamesText += `*...and ${gamesList.length - 5} more games.*`;
-                        }
-                        embed.addFields({ name: 'Attached Games', value: gamesText });
-                    } else {
-                        embed.addFields({ name: 'Attached Games', value: 'No public games attached to this group.' });
-                    }
-
-                    // Send Alert
-                    await channel.send({ embeds: [embed] });
-
-                    // Save history so we don't alert again
-                    db.markTrackedAlert(userId, groupInfo.id);
-
-                    // Sleep nicely to prevent rapid rate limits
-                    await sleep(2000);
-                }
+            if (group.role.rank > 1) {
+                activeGroupMap.set(group.group.id, group);
             }
         }
+
+        // 4. Compare with DB History
+        const previousHistory = db.getTrackerHistory(userId);
+        const newGroupIds = Array.from(activeGroupMap.keys()).filter(id => !previousHistory.includes(id));
+
+        // If they acquired a MASSIVE amount of groups suddenly (or if the bot crashed midway through the first boot's save)
+        // just silently sync the state to prevent 50 spam embeds. Realistically they only acquire 1-2 groups in 6 hours.
+        if (newGroupIds.length > 2 || previousHistory.length === 0) {
+            db.syncTrackerHistory(userId, Array.from(activeGroupMap.keys()));
+            return;
+        }
+
+        // Genuine new acquisition! Loop through the 1 or 2 new groups and alert
+        for (const groupId of newGroupIds) {
+            const groupData = activeGroupMap.get(groupId);
+            const role = groupData.role;
+            const groupInfo = groupData.group;
+
+            // Fetch group's games
+            let gamesList = [];
+            try {
+                const gamesData = await fetchWithRetry(`https://games.roblox.com/v2/groups/${groupId}/games?accessFilter=Public&sortOrder=Asc&limit=10`);
+                if (gamesData && gamesData.data) {
+                    gamesList = gamesData.data;
+                }
+            } catch (e) { }
+
+            // Fetch Group Logo
+            let groupIconUrl = null;
+            try {
+                const iconData = await fetchWithRetry(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupId}&size=150x150&format=Png&isCircular=false`);
+                if (iconData && iconData.data && iconData.data.length > 0) {
+                    groupIconUrl = iconData.data[0].imageUrl;
+                }
+            } catch (e) { }
+
+            // Build Embed
+            const embed = new EmbedBuilder()
+                .setColor('#ffcc00')
+                .setAuthor({ name: 'Acquisition Tracker', iconURL: headshotUrl || undefined })
+                .setTitle(`${username} was ranked in a Group!`)
+                .setThumbnail(groupIconUrl || undefined)
+                .setDescription(`**Group:** [${groupInfo.name}](https://www.roblox.com/groups/${groupInfo.id})\n**Added Rank:** \`${role.name}\` (Rank: ${role.rank})\n**Member Count:** ${groupInfo.memberCount.toLocaleString()}`)
+                .setTimestamp();
+
+            if (gamesList.length > 0) {
+                let gamesText = '';
+                const topGames = gamesList.slice(0, 5); 
+                for (const game of topGames) {
+                    gamesText += `🎮 [${game.name}](https://www.roblox.com/games/${game.rootPlace.id})\n`;
+                }
+                if (gamesList.length > 5) {
+                    gamesText += `*...and ${gamesList.length - 5} more games.*`;
+                }
+                embed.addFields({ name: 'Attached Games', value: gamesText });
+            } else {
+                embed.addFields({ name: 'Attached Games', value: 'No public games attached to this group.' });
+            }
+
+            // Send Alert
+            await channel.send({ embeds: [embed] });
+            
+            // Save history incrementally just in case it drops
+            db.markTrackedAlert(userId, groupInfo.id);
+            await sleep(2000); // Dodge discord API spikes
+        }
+        
+        // Final sync of the complete picture
+        db.syncTrackerHistory(userId, Array.from(activeGroupMap.keys()));
+
     } catch (err) {
         console.error(`[Tracker] Error checking account ${userId}:`, err);
     }

@@ -61,6 +61,10 @@ module.exports = {
     },
     
     // Tracker Methods
+    isUserTracked: (robloxUserId) => {
+        const data = loadData();
+        return !!data.trackerHistory[robloxUserId];
+    },
     hasTrackedAlert: (robloxUserId, groupId) => {
         const data = loadData();
         if (!data.trackerHistory[robloxUserId]) return false;
