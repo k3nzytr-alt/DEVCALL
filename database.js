@@ -5,7 +5,7 @@ const dataFile = path.join(__dirname, 'data.json');
 
 // Initialize data.json if it doesn't exist
 if (!fs.existsSync(dataFile)) {
-    fs.writeFileSync(dataFile, JSON.stringify({ warnings: {} }, null, 2));
+    fs.writeFileSync(dataFile, JSON.stringify({ warnings: {}, trackerHistory: {} }, null, 2));
 }
 
 // In-memory cache for better performance under traffic
@@ -16,10 +16,12 @@ function loadData() {
     try {
         const data = fs.readFileSync(dataFile, 'utf8');
         _cache = JSON.parse(data);
+        if (!_cache.trackerHistory) _cache.trackerHistory = {};
+        if (!_cache.warnings) _cache.warnings = {};
         return _cache;
     } catch (err) {
         console.error("Error loading data:", err);
-        _cache = { warnings: {} };
+        _cache = { warnings: {}, trackerHistory: {} };
         return _cache;
     }
 }
@@ -56,5 +58,22 @@ module.exports = {
             return true;
         }
         return false;
+    },
+    
+    // Tracker Methods
+    hasTrackedAlert: (robloxUserId, groupId) => {
+        const data = loadData();
+        if (!data.trackerHistory[robloxUserId]) return false;
+        return data.trackerHistory[robloxUserId].includes(groupId);
+    },
+    markTrackedAlert: (robloxUserId, groupId) => {
+        const data = loadData();
+        if (!data.trackerHistory[robloxUserId]) {
+            data.trackerHistory[robloxUserId] = [];
+        }
+        if (!data.trackerHistory[robloxUserId].includes(groupId)) {
+            data.trackerHistory[robloxUserId].push(groupId);
+            saveData();
+        }
     }
 };

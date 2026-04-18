@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, ActionRowBuilder,
 const commandDefinitions = require('./commands.js');
 const db = require('./database.js');
 const intel = require('./intel.js');
+const tracker = require('./tracker.js');
 
 const client = new Client({
     intents: [
@@ -81,6 +82,9 @@ client.once('ready', async () => {
             await guild.leave().catch(() => {});
         }
     }
+    
+    // Start Acquisition Tracker
+    tracker.start(client);
 });
 
 // Auto-leave if added to an unauthorized server
@@ -439,9 +443,9 @@ client.on('messageCreate', async message => {
             return;
         }
 
-        const ccu = Math.ceil(dataObj.kpi?.playing?.current?.value || 0);
-        const revenue = Math.ceil(dataObj.kpi?.revenue?.current?.value || 0);
-        const visits = Math.ceil(dataObj.kpi?.visits?.current?.value || dataObj.info?.visits || 0);
+        const ccu = Math.ceil(dataObj.info?.playing ?? dataObj.kpi?.playing?.current?.value ?? 0);
+        const revenue = Math.ceil(dataObj.kpi?.revenue?.current?.value ?? 0);
+        const visits = Math.ceil(dataObj.info?.visits ?? dataObj.kpi?.visits?.current?.value ?? 0);
 
         let ratioStr = 'N/A';
         if (dataObj.votes) {

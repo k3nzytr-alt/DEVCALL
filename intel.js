@@ -146,11 +146,14 @@ async function getEmbed(data, tab, page) {
         embed.setDescription(`[View on Roblox](https://www.roblox.com/games/${data.placeId})`);
 
         const kpi = data.kpi;
-        if (kpi) {
+        if (kpi || data.info) {
+            const livePlayers = data.info?.playing ?? kpi?.playing?.current?.value;
+            const liveVisits = data.info?.visits ?? kpi?.visits?.current?.value;
+            
             embed.addFields(
-                { name: 'Live Players', value: `${formatNum(kpi.playing?.current?.value)}${formatChange(kpi.playing?.week?.percent_change)}`, inline: true },
-                { name: 'Visits', value: `${formatNum(kpi.visits?.current?.value)}${formatChange(kpi.visits?.week?.percent_change)}`, inline: true },
-                { name: 'Avg Session', value: `${kpi.session_length?.current?.value ? Math.ceil(kpi.session_length.current.value) + 'm' : 'N/A'}${formatChange(kpi.session_length?.week?.percent_change)}`, inline: true }
+                { name: 'Live Players', value: `${formatNum(livePlayers)}${formatChange(kpi?.playing?.week?.percent_change)}`, inline: true },
+                { name: 'Visits', value: `${formatNum(liveVisits)}${formatChange(kpi?.visits?.week?.percent_change)}`, inline: true },
+                { name: 'Avg Session', value: `${kpi?.session_length?.current?.value ? Math.ceil(kpi.session_length.current.value) + 'm' : 'N/A'}${formatChange(kpi?.session_length?.week?.percent_change)}`, inline: true }
             );
             if (kpi.revenue?.current?.value) {
                 const baseRev = kpi.revenue.current.value;
@@ -227,6 +230,16 @@ async function getEmbed(data, tab, page) {
     }
     else if (tab === 'retention') {
         embed.setTitle(`Player Stickiness & Retention`);
+        
+        if (data.rolearn && data.rolearn.performance_insights) {
+            const stickiness = data.rolearn.performance_insights.stickiness || 0;
+            const trend = data.rolearn.predictions?.trend_score ? (data.rolearn.predictions.trend_score * 100).toFixed(1) : 0;
+            embed.addFields(
+                { name: 'Magnetism (Stickiness)', value: `**${stickiness}%** session retention`, inline: true },
+                { name: 'Algo Momentum / Reach', value: `**${trend}%** trend momentum`, inline: true }
+            );
+        }
+
         const coreBadges = data.coreBadges || [];
 
         if (coreBadges.length === 0) {
@@ -312,7 +325,7 @@ async function fetchGameData(placeId, fetchOpts) {
 
     const now = new Date().toISOString();
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [kpiRes, mediaRes, infoRes, voteRes, badgeRes, discordRes, simRes, bloxbizRes] = await Promise.allSettled([
+    const [kpiRes, mediaRes, infoRes, voteRes, badgeRes, discordRes, simRes, bloxbizRes, rolearnRes] = await Promise.allSettled([
         timedFetch(`https://api.creatorexchange.io/v2/metrics/latest/kpi_trends?universeIds=${universeId}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v2/games/${universeId}/media`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`, fetchOpts),
@@ -320,7 +333,8 @@ async function fetchGameData(placeId, fetchOpts) {
         timedFetch(`https://badges.roblox.com/v1/universes/${universeId}/badges?limit=100`, fetchOpts),
         timedFetch(`https://creatorexchange.io/api/v2/metrics/historical/discord_metrics?universeIds=${universeId}&granularity=DAY&start=${weekAgo}&end=${now}`, fetchOpts),
         timedFetch(`https://games.roblox.com/v1/games/recommendations/game/${universeId}?maxRows=5`, fetchOpts),
-        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts, BLOXBIZ_TIMEOUT)
+        timedFetch(`https://portal-api.bloxbiz.com/explore/games/${universeId}/details?fields=dev_products,gamepasses`, fetchOpts, BLOXBIZ_TIMEOUT),
+        timedFetch(`https://rolearn.dev/api/game/${placeId}`, fetchOpts)
     ]);
 
     const dataObj = {
@@ -419,6 +433,13 @@ async function fetchGameData(placeId, fetchOpts) {
     if (simRes.status === 'fulfilled' && simRes.value.ok) {
         const d = await simRes.value.json();
         dataObj.similar = d.games || [];
+    }
+
+    if (rolearnRes && rolearnRes.status === 'fulfilled' && rolearnRes.value.ok) {
+        try {
+            const d = await rolearnRes.value.json();
+            if (d) dataObj.rolearn = d;
+        } catch (e) {}
     }
 
     // Store in game data cache
